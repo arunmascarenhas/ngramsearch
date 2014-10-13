@@ -1,0 +1,105 @@
+(ns ngramsearch.core
+  (:require [clojure.java.io :as io]))
+
+(defn foo
+  "I don't do a whole lot."
+  [x]
+  (println x "Hello, World!"))
+
+(defn levenshtein-distance
+  "Calculates the Levenshtein distance between the two input strings"
+  {:test #(do
+            (assert (= (levenshtein-distance "kitten" "sitting")
+                       3)))}
+  [a b]
+  (cond
+   (empty? a) (count b)
+   (empty? b) (count a)
+   :else (letfn [(inc-amount [x y]
+                   (if (= (first x) (first y))
+                     0 1))
+                 (levenshtein [x y]
+                   (min (+ (levenshtein-distance (next x) y) 1)
+                        (+ (levenshtein-distance x (next y)) 1)
+                        (+ (levenshtein-distance (next x) (next y)) (inc-amount x y))))]
+           (levenshtein a b))))
+
+(defn read-input-file [f]
+  (let [dict (with-open [rdr (io/reader f)]
+               (doall (line-seq rdr)))]
+    dict))
+
+(defn create-trigram-tokens [w]
+  (map #(reduce str %)
+       (partition 3 1 (str "  " w "  "))))
+
+(defn parse-word [w]
+  (clojure.string/replace (.toLowerCase w)
+                          #"0|1st|1|2nd|2|3|4|5|6|7|8|9|&"
+                          {"0" "zero"
+                           "1st" "first"
+                           "1" "one"
+                           "2nd" "second"
+                           "2" "two"
+                           "3" "three"
+                           "4" "four"
+                           "5" "five"
+                           "6" "six"
+                           "7" "seven"
+                           "8" "eight"
+                           "9" "nine"
+                           "&" "and"}))
+
+(defn parse-dictionary [dict]
+  (reduce (fn [trigram-map word]
+            (let [parsed-word (parse-word word)
+                  trigram-seq (create-trigram-tokens parsed-word)]
+              (reduce (fn [m trigram]
+                        (assoc m trigram (cons word (set (get m trigram)))))
+                      trigram-map
+                      trigram-seq)))
+          {}
+          dict))
+
+(defn calculate-transposition-priorities [trigrams]
+  (reduce (fn [transposition-priority-map trigram]
+            (let [transposed-trigram (str (nth trigram 0)
+                                          (nth trigram 2)
+                                          (nth trigram 1))
+                  transposition-priority-map_1 (assoc transposition-priority-map trigram 2.0)
+                  transposition-priority-map_2 (assoc transposition-priority-map_1 transposed-trigram 0.8)]
+              transposition-priority-map_2))
+          {}
+          trigrams))
+
+;; TODO - improve method (param names, bindings etc)
+(defn search-and-score [transposed-prioritized-trigrams dictionary-trigrams]
+  (reduce (fn [results-map trigram]
+            (let [words (get dictionary-trigrams (key trigram))]
+              (reduce (fn [m dict-trigram]
+                        (assoc m dict-trigram (+ (get m dict-trigram 0)
+                                                 (get transposed-prioritized-trigrams (key trigram) 0))))
+                      results-map
+                      words)))
+          {}
+          transposed-prioritized-trigrams))
+
+(defn sort-by-value [coll]
+  (into (sorted-map-by (fn [key1 key2]
+                         (compare [(get coll key2) key2]
+                                  [(get coll key1) key1])))
+        coll))
+
+(defn levenshtein-score [search-term score-map]
+  (sort-by-value
+   (reduce (fn [levenshtein-score-map word]
+             (let [parsed-word (parse-word (first word))]
+               (assoc levenshtein-score-map parsed-word (/ (get score-map parsed-word 0)
+(levenshtein-distance search-term parsed-word)))))
+          {}
+          (seq (sort-by-value score-map)))))
+
+(defn create-input-dictionary-from [f]
+  (-> f
+      read-input-file
+      parse-dictionary))
